@@ -1,0 +1,1718 @@
+---
+title: "5205_Final_Project"
+author:  "Yuhao Liu, Xinyi Liang, Jinxin Li, Tianyuan Deng, Zahradeen Ibrahim"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+# {.tabset}
+## Data Preparation
+
+### Data Loading
+```{r}
+df = read.csv("df_all.csv", stringsAsFactors = F)
+head(df, 10)
+```
+
+```{r}
+str(df)
+```
+
+```{r}
+library(tidyverse)
+library(naniar)
+```
+
+### Data Cleaning
+
+```{r}
+# Delete the senseless , unusable, or higher missing value columns
+df1 <- df[,!colnames(df) %in% c("X","channelId", "defaultLanguage", "favoriteCount", "defaultAudioLanguage", "liveBroadcastContent")]
+```
+
+```{r}
+## reason to delete those variable above
+summary(df$favoriteCount)
+miss_var_summary(df)
+str(df$defaultAudioLanguage)
+str(df$liveBroadcastContent)
+unique(df$liveBroadcastContent)
+```
+
+```{r}
+str(df1)
+head(df1)
+miss_var_summary(df1)
+```
+
+#### Impute missing data
+
+```{r}
+
+library(caret)
+```
+
+```{r}
+set.seed(6666)
+df2 = predict(preProcess(df1[, c("viewCount", "likeCount", "commentCount") ], "bagImpute"), newdata = df1[, c("viewCount", "likeCount", "commentCount")])
+df2 <- lapply(df2, as.integer)
+df2
+```
+
+
+```{r}
+df1[,c("viewCount", "likeCount", "commentCount")] = df2
+df1
+```
+```{r}
+miss_var_summary(df1)
+```
+
+```{r}
+write.csv(df1, file = "df_all_Cleaned_Data.csv")
+```
+
+-----------------------------------
+## Sentiment Analysis
+### Reading the Dataset
+
+```{r}
+youtube = read.csv('df_all_Cleaned_Data.csv', stringsAsFactors = F)
+```
+
+#### View the Structure
+```{r}
+str(youtube)
+```
+#### Median Number of Views
+```{r}
+median(youtube$viewCount)
+```
+
+#### Mean and Median
+```{r}
+library(dplyr); library(magrittr)
+youtube%>%
+  summarize(average_rating = mean(viewCount), median_rating = median(viewCount))
+```
+
+
+#### Distribution of Likes
+```{r}
+library(ggplot2); library(ggthemes)
+ggplot(data=youtube,aes(x=viewCount))+
+  geom_histogram(fill='sienna3')+
+  theme_bw()+
+  scale_x_reverse()+
+  xlab('Like Count')+
+  coord_flip()
+```
+
+### Text formatting correction
+
+#### View Description 400
+```{r}
+youtube$description[400]
+```
+#### Number of Characters in Description 400
+```{r}
+nchar(youtube$description[400])
+```
+
+#### Number of Words in Description 400
+```{r}
+library(stringr)
+str_count(string = youtube$description[400],pattern = '\\S+')
+```
+
+#### Number of Sentences in Description 400
+```{r}
+str_count(string = youtube$description[400],pattern = "[A-Za-z,;'\"\\s]+[^.!?]*[.?!]")
+
+```
+
+#### Allow Multibyte Characters
+```{r}
+youtube$description <- iconv(youtube$description, "ASCII", "UTF-8", sub="byte")
+```
+
+#### Summary of Characters in Description Variable
+```{r}
+summary(nchar(youtube$description))
+```
+
+#### Summary of Words in Description Variable
+```{r}
+summary(str_count(string = youtube$description,pattern = '\\S+'))
+
+```
+
+#### Summary of Sentences in Description Variable
+```{r}
+summary(str_count(string = youtube$description,pattern = "[A-Za-z,;'\"\\s]+[^.!?]*[.?!]"))
+```
+
+#### Summary of the Description Variable
+```{r}
+library(dplyr)
+youtube %>%
+  select(description)%>%
+  mutate(characters = nchar(description),
+         words = str_count(description,pattern='\\S+'),
+         sentences = str_count(description,pattern="[A-Za-z,;'\"\\s]+[^.!?]*[.?!]"))%>%
+  summarize_at(c('characters','words','sentences'),.funs = mean,na.rm=T)
+```
+#### Shortest Description
+```{r}
+shortest_description_index = which.min(str_count(string = youtube$description,pattern = '\\S+'))
+youtube$description[shortest_description_index]
+```
+
+
+#### Longest Description
+```{r}
+shortest_longest_index = which.max(str_count(string = youtube$description,pattern = '\\S+'))
+youtube$description[shortest_longest_index]
+```
+
+
+#### Correlation Between Number of Views with Characters, Words and Sentences
+```{r}
+r_characters_des = cor.test(nchar(youtube$description),youtube$viewCount)
+r_words_des = cor.test(str_count(string = youtube$description,pattern = '\\S+'),youtube$viewCount)
+r_sentences_des = cor.test(str_count(string = youtube$description,pattern = "[A-Za-z,;'\"\\s]+[^.!?]*[.?!]"),youtube$viewCount)
+correlations_des = data.frame(r = c(r_characters_des$estimate, r_words_des$estimate, r_sentences_des$estimate),p_value=c(r_characters_des$p.value, r_words_des$p.value, r_sentences_des$p.value))
+rownames(correlations_des) = c('Characters','Words','Sentences')
+correlations_des
+```
+
+#### Descriptions in Uppercase
+```{r}
+percentUpper = 100*str_count(youtube$description,pattern='[A-Z]')/nchar(youtube$description)
+summary(percentUpper)
+
+```
+
+
+#### Exclamation Marks
+```{r}
+percentExclamation = 100*str_count(youtube$description,pattern='!')/nchar(youtube$description)
+summary(percentExclamation)
+```
+
+
+#### Impact of Upper Case and Exclamation marks on Like Count
+```{r}
+r_upper = cor.test(percentUpper,youtube$likeCount)
+r_exclamation = cor.test(percentExclamation,youtube$likeCount)
+correlations2 = data.frame(r = c(r_upper$estimate, r_exclamation$estimate),p_value=c(r_upper$p.value, r_exclamation$p.value))
+rownames(correlations2) = c('Upper Case','Exclamation Marks')
+correlations2
+```
+
+
+### Common Words
+```{r}
+library(dplyr); library(tidytext); library(magrittr)
+youtube%>%
+  unnest_tokens(input = description, output = word)%>%
+  select(word)%>%
+  group_by(word)%>%
+  summarize(count = n())%>%
+  ungroup()%>%
+  arrange(desc(count))%>%
+  top_n(25)
+```
+#### Common Words Plot
+```{r}
+youtube%>%
+  unnest_tokens(input = description, output = word)%>%
+  select(word)%>%
+  group_by(word)%>%
+  summarize(count = n())%>%
+  ungroup()%>%
+  arrange(desc(count))%>%
+  top_n(25)%>%
+  ggplot(aes(x=reorder(word,count), y=count, fill=count))+
+    geom_col()+
+    xlab('words')+
+    coord_flip()
+```
+#### Top 25 list after removing the Stopwords
+```{r}
+youtube%>%
+  unnest_tokens(input = description, output = word)%>%
+  select(word)%>%
+  anti_join(stop_words)%>%
+  group_by(word)%>%
+  summarize(count = n())%>%
+  ungroup()%>%
+  arrange(desc(count))%>%
+  top_n(25)
+```
+
+
+### Tokenization
+#### Counting the number of words in each review
+
+```{r}
+library(dplyr); library(tidytext)
+youtube %>%
+  select(X,description)%>%
+  group_by(X)%>%
+  unnest_tokens(output = word,input=description)%>%
+  ungroup()%>%
+  group_by(X)%>%
+  summarize(count = n())
+```
+#### Plotting the number of words in each review
+
+```{r}
+library(dplyr); library(tidytext)
+youtube %>%
+  select(X,description)%>%
+  group_by(X)%>%
+  unnest_tokens(output = word,input=description)%>%
+  ungroup()%>%
+  group_by(X)%>%
+  summarize(count = n())%>%
+  ggplot(aes(x=count))+geom_histogram(bins = 40)+xlab('Number of Words')
+```
+#### Number of Tokens
+```{r}
+youtube %>%
+  select(X,description)%>%
+  group_by(X)%>%
+  unnest_tokens(output = word,input=description)%>%
+  ungroup()%>%
+  count()
+
+```
+#### Binary Sentiment Lexicons
+
+```{r}
+as.data.frame(get_sentiments('bing'))[1:50,]
+```
+#### Valence of words
+
+```{r}
+youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output = word, input = description)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(sentiment)
+```
+
+
+#### Valence in Description
+```{r}
+youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output = word, input = description)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(sentiment)%>%
+  count()
+```
+
+#### Plotting Valence of Words
+```{r}
+youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output = word, input = description)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(sentiment)%>%
+  count()%>%
+  ggplot(aes(x=sentiment,y=n,fill=sentiment))+
+  geom_col()+
+  theme_economist()+
+  guides(fill=F)+
+  coord_flip()
+```
+#### Proportion of words in reviews that are positive
+```{r}
+youtube %>%
+  select(X,description)%>%
+  group_by(X)%>%
+  unnest_tokens(output=word,input=description)%>%
+  ungroup()%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(sentiment)%>%
+  summarize(n = n())%>%
+  mutate(proportion = n/sum(n))
+```
+
+#### Proportion of positive (and negative words) for each Category ID.
+
+
+```{r}
+youtube %>%
+  select(X,description,categoryId)%>%
+  group_by(X, categoryId)%>%
+  unnest_tokens(output=word,input=description)%>%
+  ungroup()%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(categoryId,sentiment)%>%
+  summarize(n = n())%>%
+  mutate(proportion = n/sum(n))
+```
+#### Plotting Proportion of positive (and negative words) for each Category ID.
+
+```{r}
+library(ggthemes)
+youtube %>%
+  select(X,description,categoryId)%>%
+  group_by(X, categoryId)%>%
+  unnest_tokens(output=word,input=description)%>%
+  ungroup()%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(categoryId,sentiment)%>%
+  summarize(n = n())%>%
+  mutate(proportion = n/sum(n))%>%
+  ggplot(aes(x=categoryId,y=proportion,fill=sentiment))+
+  geom_col()+
+  theme_economist()+
+  coord_flip()
+```
+#### Proportion of positive words for each Description
+```{r}
+youtube%>%
+  group_by(X, viewCount)%>%
+  unnest_tokens(output = word, input = description)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(X,viewCount)%>%
+  summarize(positive_words = sum(sentiment=='positive'),
+            negative_words = sum(sentiment=='negative'),
+            proportion_positive = positive_words/(positive_words+negative_words))%>%
+  ungroup()
+```
+
+#### Are reviews with a lot of positive words viewed more?
+
+
+```{r}
+youtube%>%
+  group_by(X, viewCount)%>%
+  unnest_tokens(output = word, input = description)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(X,viewCount)%>%
+  summarize(positive_words = sum(sentiment=='positive'),
+            negative_words = sum(sentiment=='negative'),
+            proportion_positive = positive_words/(positive_words+negative_words))%>%
+  ungroup()%>%
+  summarize(correlation = cor(proportion_positive,viewCount))
+
+```
+
+###  Sentiment score Lexicons
+#### afinn sentiment
+```{r}
+afinn = get_sentiments('afinn')
+
+```
+
+```{r}
+afinn[1:50,]
+```
+#### Distribution of sentiment
+
+```{r}
+youtube %>%
+  select(X,description)%>%
+  group_by(X)%>%
+  unnest_tokens(output=word,input=description)%>%
+  inner_join(afinn)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.1)+
+  scale_x_continuous(breaks=seq(-5,5,1))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  guides(fill=F)+
+  theme_wsj()
+```
+### Word Cloud
+```{r}
+library(wordcloud)
+wordcloudData = 
+  youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output=word,input=description)%>%
+  ungroup()%>%
+  select(X,word)%>%
+  anti_join(stop_words)%>%
+  group_by(word)%>%
+  summarize(freq = n())%>%
+  arrange(desc(freq))%>%
+  ungroup()%>%
+  data.frame()
+
+
+library(wordcloud)
+set.seed(617)
+wordcloud(words = wordcloudData$word,wordcloudData$freq,scale=c(2,0.5),max.words = 100,colors=brewer.pal(9,"Spectral"))
+
+```
+#### Comparison Cloud
+```{r}
+library(tidyr)
+wordcloudData = 
+  youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output=word,input=description)%>%
+  ungroup()%>%
+  select(X,word)%>%
+  anti_join(stop_words)%>%
+  inner_join(get_sentiments('bing'))%>%
+  ungroup()%>%
+  count(sentiment,word,sort=T)%>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0)%>%
+  data.frame()
+rownames(wordcloudData) = wordcloudData[,'word']
+wordcloudData = wordcloudData[,c('positive','negative')]
+set.seed(617)
+comparison.cloud(term.matrix = wordcloudData,scale = c(2,0.5),max.words = 200, rot.per=0)
+```
+
+### TAGSS
+#### Tag 400
+```{r}
+youtube$tags[400]
+```
+
+#### Validate Multibyte Characters
+```{r}
+youtube$tags <- iconv(youtube$tags, "ASCII", "UTF-8", sub="byte")
+```
+
+#### Summary of Tags Variable
+```{r}
+summary(nchar(youtube$tags))
+```
+
+#### Tag 400 
+```{r}
+youtube$tags[400]
+```
+### Average Characters, Words, and Sentences in the Tags Variable
+
+```{r}
+library(dplyr)
+youtube %>%
+  select(tags)%>%
+  mutate(characters = nchar(tags),
+         words = str_count(tags,pattern='\\S+'),
+         sentences = str_count(tags,pattern="[A-Za-z,;'\"\\s]+[^.!?]*[.?!]"))%>%
+  summarize_at(c('characters','words','sentences'),.funs = mean,na.rm=T)
+```
+#### Shortest Tag
+```{r}
+shortest_tag_index = which.min(str_count(string = youtube$tags,pattern = '\\S+'))
+youtube$tags[shortest_tag_index]
+```
+
+#### Longest Tag
+```{r}
+longest_tag_index = which.max(str_count(string = youtube$tags,pattern = '\\S+'))
+youtube$tags[longest_tag_index]
+```
+#### Correlation between Number of Views and Characters, Words, and Sentences.
+```{r}
+r_characters = cor.test(nchar(youtube$tags),youtube$viewCount)
+r_words = cor.test(str_count(string = youtube$tags,pattern = '\\S+'),youtube$viewCount)
+r_sentences = cor.test(str_count(string = youtube$tags,pattern = "[A-Za-z,;'\"\\s]+[^.!?]*[.?!]"),youtube$viewCount)
+correlations = data.frame(r = c(r_characters$estimate, r_words$estimate, r_sentences$estimate),p_value=c(r_characters$p.value, r_words$p.value, r_sentences$p.value))
+rownames(correlations) = c('Characters','Words','Sentences')
+correlations
+```
+
+#### Tags in Uppercase
+```{r}
+percentUpper = 100*str_count(youtube$tags,pattern='[A-Z]')/nchar(youtube$tags)
+summary(percentUpper)
+
+```
+
+
+#### Exclamation Marks
+```{r}
+percentExclamation = 100*str_count(youtube$tags,pattern='!')/nchar(youtube$tags)
+summary(percentExclamation)
+```
+
+
+#### Impact of Upper Case and Exclamation marks on Like Count
+```{r}
+r_upper = cor.test(percentUpper,youtube$viewCount)
+r_exclamation = cor.test(percentExclamation,youtube$viewCount)
+correlations2 = data.frame(r = c(r_upper$estimate, r_exclamation$estimate),p_value=c(r_upper$p.value, r_exclamation$p.value))
+rownames(correlations2) = c('Upper Case','Exclamation Marks')
+correlations2
+```
+#### Common Words
+```{r}
+youtube%>%
+  unnest_tokens(input = tags, output = word)%>%
+  select(word)%>%
+  group_by(word)%>%
+  summarize(count = n())%>%
+  ungroup()%>%
+  arrange(desc(count))%>%
+  top_n(25)
+```
+#### Plot Common Words
+```{r}
+youtube%>%
+  unnest_tokens(input = tags, output = word)%>%
+  select(word)%>%
+  group_by(word)%>%
+  summarize(count = n())%>%
+  ungroup()%>%
+  arrange(desc(count))%>%
+  top_n(25)%>%
+  ggplot(aes(x=reorder(word,count), y=count, fill=count))+
+    geom_col()+
+    xlab('words')+
+    coord_flip()
+```
+#### Top 25 list after removing the Stopwords
+```{r}
+youtube%>%
+  unnest_tokens(input = tags, output = word)%>%
+  select(word)%>%
+  anti_join(stop_words)%>%
+  group_by(word)%>%
+  summarize(count = n())%>%
+  ungroup()%>%
+  arrange(desc(count))%>%
+  top_n(25)
+```
+
+
+### Tokenization
+#### Counting the number of words in each tag
+
+```{r}
+youtube %>%
+  select(X,tags)%>%
+  group_by(X)%>%
+  unnest_tokens(output = word,input=tags)%>%
+  ungroup()%>%
+  group_by(X)%>%
+  summarize(count = n())
+```
+#### Plot Tokens
+```{r}
+youtube %>%
+  select(X,tags)%>%
+  group_by(X)%>%
+  unnest_tokens(output = word,input=tags)%>%
+  ungroup()%>%
+  group_by(X)%>%
+  summarize(count = n())%>%
+  ggplot(aes(x=count))+geom_histogram(bins = 40)+xlab('Number of Words')
+```
+#### Number of Tokens
+```{r}
+youtube %>%
+  select(X,tags)%>%
+  group_by(X)%>%
+  unnest_tokens(output = word,input=tags)%>%
+  ungroup()%>%
+  count()
+
+```
+#### Binary Sentiment Lexicons
+
+```{r}
+as.data.frame(get_sentiments('bing'))[1:50,]
+```
+#### Valence of words
+
+```{r}
+youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output = word, input = tags)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(sentiment)
+```
+
+
+#### Valence in Tags
+```{r}
+youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output = word, input = tags)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(sentiment)%>%
+  count()
+```
+#### Plot Valence
+```{r}
+youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output = word, input = tags)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(sentiment)%>%
+  count()%>%
+  ggplot(aes(x=sentiment,y=n,fill=sentiment))+
+  geom_col()+
+  theme_economist()+
+  guides(fill=F)+
+  coord_flip()
+```
+#### Proportion of words in reviews that are positive
+```{r}
+youtube %>%
+  select(X,tags)%>%
+  group_by(X)%>%
+  unnest_tokens(output=word,input=tags)%>%
+  ungroup()%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(sentiment)%>%
+  summarize(n = n())%>%
+  mutate(proportion = n/sum(n))
+```
+
+#### Proportion of positive (and negative words) for each Category ID.
+
+
+```{r}
+youtube %>%
+  select(X,tags,categoryId)%>%
+  group_by(X, categoryId)%>%
+  unnest_tokens(output=word,input=tags)%>%
+  ungroup()%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(categoryId,sentiment)%>%
+  summarize(n = n())%>%
+  mutate(proportion = n/sum(n))
+```
+
+#### Proportion of positive (and negative words) for each Category ID.
+
+```{r}
+library(ggthemes)
+youtube %>%
+  select(X,tags,categoryId)%>%
+  group_by(X, categoryId)%>%
+  unnest_tokens(output=word,input=tags)%>%
+  ungroup()%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(categoryId,sentiment)%>%
+  summarize(n = n())%>%
+  mutate(proportion = n/sum(n))%>%
+  ggplot(aes(x=categoryId,y=proportion,fill=sentiment))+
+  geom_col()+
+  theme_economist()+
+  coord_flip()
+```
+#### Proportion of positive words for each Description
+```{r}
+youtube%>%
+  group_by(X, viewCount)%>%
+  unnest_tokens(output = word, input = tags)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(X,viewCount)%>%
+  summarize(positive_words = sum(sentiment=='positive'),
+            negative_words = sum(sentiment=='negative'),
+            proportion_positive = positive_words/(positive_words+negative_words))%>%
+  ungroup()
+```
+
+#### Are reviews with a lot of positive words viewed more?
+
+
+```{r}
+youtube%>%
+  group_by(X, viewCount)%>%
+  unnest_tokens(output = word, input = tags)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(X,viewCount)%>%
+  summarize(positive_words = sum(sentiment=='positive'),
+            negative_words = sum(sentiment=='negative'),
+            proportion_positive = positive_words/(positive_words+negative_words))%>%
+  ungroup()%>%
+  summarize(correlation = cor(proportion_positive,viewCount))
+
+```
+
+###  Sentiment score Lexicons
+#### afinn sentiment
+```{r}
+afinn = get_sentiments('afinn')
+
+```
+
+```{r}
+afinn[1:50,]
+```
+#### Distribution of sentiment
+
+```{r}
+youtube %>%
+  select(X,tags)%>%
+  group_by(X)%>%
+  unnest_tokens(output=word,input=tags)%>%
+  inner_join(afinn)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.1)+
+  scale_x_continuous(breaks=seq(-5,5,1))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  guides(fill=F)+
+  theme_wsj()
+```
+#### Word Cloud
+```{r}
+library(wordcloud)
+wordcloudData = 
+  youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output=word,input=tags)%>%
+  ungroup()%>%
+  select(X,word)%>%
+  anti_join(stop_words)%>%
+  group_by(word)%>%
+  summarize(freq = n())%>%
+  arrange(desc(freq))%>%
+  ungroup()%>%
+  data.frame()
+
+
+library(wordcloud)
+set.seed(617)
+wordcloud(words = wordcloudData$word,wordcloudData$freq,scale=c(2,0.5),max.words = 100,colors=brewer.pal(9,"Spectral"))
+
+```
+#### Comparison Cloud
+```{r}
+wordcloudData = 
+  youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output=word,input=tags)%>%
+  ungroup()%>%
+  select(X,word)%>%
+  anti_join(stop_words)%>%
+  inner_join(get_sentiments('bing'))%>%
+  ungroup()%>%
+  count(sentiment,word,sort=T)%>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0)%>%
+  data.frame()
+rownames(wordcloudData) = wordcloudData[,'word']
+wordcloudData = wordcloudData[,c('positive','negative')]
+set.seed(617)
+comparison.cloud(term.matrix = wordcloudData,scale = c(2,0.5),max.words = 200, rot.per=0)
+```
+
+
+
+### TITLE
+#### Title 400
+```{r}
+youtube$title[400]
+```
+
+
+#### Validate Multibyte Characters
+```{r}
+youtube$title <- iconv(youtube$title, "ASCII", "UTF-8", sub="byte")
+```
+
+#### Summary of Title Variable
+```{r}
+summary(nchar(youtube$title))
+```
+
+#### Average Number  of Characters, Words amd Sentences in Each Title 
+
+```{r}
+library(dplyr)
+youtube %>%
+  select(title)%>%
+  mutate(characters = nchar(title),
+         words = str_count(title,pattern='\\S+'),
+         sentences = str_count(title,pattern="[A-Za-z,;'\"\\s]+[^.!?]*[.?!]"))%>%
+  summarize_at(c('characters','words','sentences'),.funs = mean,na.rm=T)
+```
+#### Shortest Title
+```{r}
+shortest_title_index = which.min(str_count(string = youtube$title,pattern = '\\S+'))
+youtube$title[shortest_title_index]
+```
+
+#### Longest Title
+
+```{r}
+longest_title_index = which.max(str_count(string = youtube$title,pattern = '\\S+'))
+youtube$title[longest_title_index]
+```
+
+
+#### Correlation Between Number of Views and Characters, Words and Sentences
+```{r}
+r_characters1 = cor.test(nchar(youtube$title),youtube$viewCount)
+r_words1 = cor.test(str_count(string = youtube$title,pattern = '\\S+'),youtube$viewCount)
+r_sentences1 = cor.test(str_count(string = youtube$title,pattern = "[A-Za-z,;'\"\\s]+[^.!?]*[.?!]"),youtube$viewCount)
+correlations1 = data.frame(r = c(r_characters1$estimate, r_words1$estimate, r_sentences1$estimate),p_value=c(r_characters1$p.value, r_words1$p.value, r_sentences1$p.value))
+rownames(correlations1) = c('Characters','Words','Sentences')
+correlations1
+```
+
+#### Titles in Uppercase
+```{r}
+percentUpper1 = 100*str_count(youtube$title,pattern='[A-Z]')/nchar(youtube$title)
+summary(percentUpper)
+
+```
+
+
+#### Exclamation Marks
+```{r}
+percentExclamation1 = 100*str_count(youtube$title,pattern='!')/nchar(youtube$title)
+summary(percentExclamation1)
+```
+
+
+#### Impact of Upper Case and Exclamation marks on Like Count
+```{r}
+r_upper1 = cor.test(percentUpper1,youtube$viewCount)
+r_exclamation1 = cor.test(percentExclamation1,youtube$viewCount)
+correlations3 = data.frame(r = c(r_upper1$estimate, r_exclamation1$estimate),p_value=c(r_upper1$p.value, r_exclamation1$p.value))
+rownames(correlations3) = c('Upper Case','Exclamation Marks')
+correlations3
+```
+#### Common Words
+```{r}
+youtube%>%
+  unnest_tokens(input = title, output = word)%>%
+  select(word)%>%
+  group_by(word)%>%
+  summarize(count = n())%>%
+  ungroup()%>%
+  arrange(desc(count))%>%
+  top_n(25)
+```
+
+#### Plot of Common Words
+```{r}
+youtube%>%
+  unnest_tokens(input = title, output = word)%>%
+  select(word)%>%
+  group_by(word)%>%
+  summarize(count = n())%>%
+  ungroup()%>%
+  arrange(desc(count))%>%
+  top_n(25)%>%
+  ggplot(aes(x=reorder(word,count), y=count, fill=count))+
+    geom_col()+
+    xlab('words')+
+    coord_flip()
+```
+
+#### Top 25 list after removing the Stopwords
+```{r}
+youtube%>%
+  unnest_tokens(input = title, output = word)%>%
+  select(word)%>%
+  anti_join(stop_words)%>%
+  group_by(word)%>%
+  summarize(count = n())%>%
+  ungroup()%>%
+  arrange(desc(count))%>%
+  top_n(25)
+```
+
+
+### Tokenization
+#### Counting the number of words in each tag
+
+```{r}
+youtube %>%
+  select(X,title)%>%
+  group_by(X)%>%
+  unnest_tokens(output = word,input=title)%>%
+  ungroup()%>%
+  group_by(X)%>%
+  summarize(count = n())
+```
+#### Plot of Tokens
+
+```{r}
+youtube %>%
+  select(X,title)%>%
+  group_by(X)%>%
+  unnest_tokens(output = word,input=title)%>%
+  ungroup()%>%
+  group_by(X)%>%
+  summarize(count = n())%>%
+  ggplot(aes(x=count))+geom_histogram(bins = 40)+xlab('Number of Words')
+```
+#### Number of Tokens
+```{r}
+youtube %>%
+  select(X,title)%>%
+  group_by(X)%>%
+  unnest_tokens(output = word,input=title)%>%
+  ungroup()%>%
+  count()
+
+```
+#### Binary Sentiment Lexicons
+
+```{r}
+as.data.frame(get_sentiments('bing'))[1:50,]
+```
+
+#### Valence of words
+
+```{r}
+youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output = word, input = tags)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(sentiment)
+```
+
+
+#### Valence in Tags
+
+```{r}
+youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output = word, input = title)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(sentiment)%>%
+  count()
+```
+
+#### Plotting Valence of words
+
+```{r}
+youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output = word, input = title)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(sentiment)%>%
+  count()%>%
+  ggplot(aes(x=sentiment,y=n,fill=sentiment))+
+  geom_col()+
+  theme_economist()+
+  guides(fill=F)+
+  coord_flip()
+```
+#### Proportion of words in reviews that are positive
+```{r}
+youtube %>%
+  select(X,title)%>%
+  group_by(X)%>%
+  unnest_tokens(output=word,input=title)%>%
+  ungroup()%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(sentiment)%>%
+  summarize(n = n())%>%
+  mutate(proportion = n/sum(n))
+```
+
+#### Proportion of positive (and negative words) for each Category ID.
+
+
+```{r}
+youtube %>%
+  select(X,title,categoryId)%>%
+  group_by(X, categoryId)%>%
+  unnest_tokens(output=word,input=title)%>%
+  ungroup()%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(categoryId,sentiment)%>%
+  summarize(n = n())%>%
+  mutate(proportion = n/sum(n))
+```
+
+
+
+#### Proportion of positive (and negative words) for each Category ID.
+
+```{r}
+library(ggthemes)
+youtube %>%
+  select(X,title,categoryId)%>%
+  group_by(X, categoryId)%>%
+  unnest_tokens(output=word,input=title)%>%
+  ungroup()%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(categoryId,sentiment)%>%
+  summarize(n = n())%>%
+  mutate(proportion = n/sum(n))%>%
+  ggplot(aes(x=categoryId,y=proportion,fill=sentiment))+
+  geom_col()+
+  theme_economist()+
+  coord_flip()
+```
+
+#### Proportion of positive words for each Description
+
+```{r}
+youtube%>%
+  group_by(X, viewCount)%>%
+  unnest_tokens(output = word, input = title)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(X,viewCount)%>%
+  summarize(positive_words = sum(sentiment=='positive'),
+            negative_words = sum(sentiment=='negative'),
+            proportion_positive = positive_words/(positive_words+negative_words))%>%
+  ungroup()
+```
+
+#### Are videos with a lot of positive words viewed more?
+
+
+```{r}
+youtube%>%
+  group_by(X, viewCount)%>%
+  unnest_tokens(output = word, input = title)%>%
+  inner_join(get_sentiments('bing'))%>%
+  group_by(X,viewCount)%>%
+  summarize(positive_words = sum(sentiment=='positive'),
+            negative_words = sum(sentiment=='negative'),
+            proportion_positive = positive_words/(positive_words+negative_words))%>%
+  ungroup()%>%
+  summarize(correlation = cor(proportion_positive,viewCount))
+
+```
+
+###  Sentiment score Lexicons
+#### afinn sentiment
+```{r}
+afinn = get_sentiments('afinn')
+
+```
+
+```{r}
+afinn[1:50,]
+```
+#### Distribution of sentiment
+
+```{r}
+youtube %>%
+  select(X,title)%>%
+  group_by(X)%>%
+  unnest_tokens(output=word,input=title)%>%
+  inner_join(afinn)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.1)+
+  scale_x_continuous(breaks=seq(-5,5,1))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  guides(fill=F)+
+  theme_wsj()
+```
+#### Word Cloud
+```{r}
+wordcloudData = 
+  youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output=word,input=title)%>%
+  ungroup()%>%
+  select(X,word)%>%
+  anti_join(stop_words)%>%
+  group_by(word)%>%
+  summarize(freq = n())%>%
+  arrange(desc(freq))%>%
+  ungroup()%>%
+  data.frame()
+
+
+library(wordcloud)
+set.seed(617)
+wordcloud(words = wordcloudData$word,wordcloudData$freq,scale=c(2,0.5),max.words = 100,colors=brewer.pal(9,"Spectral"))
+
+```
+
+#### Comparison Cloud
+
+```{r}
+wordcloudData = 
+  youtube%>%
+  group_by(X)%>%
+  unnest_tokens(output=word,input=title)%>%
+  ungroup()%>%
+  select(X,word)%>%
+  anti_join(stop_words)%>%
+  inner_join(get_sentiments('bing'))%>%
+  ungroup()%>%
+  count(sentiment,word,sort=T)%>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0)%>%
+  data.frame()
+rownames(wordcloudData) = wordcloudData[,'word']
+wordcloudData = wordcloudData[,c('positive','negative')]
+set.seed(617)
+comparison.cloud(term.matrix = wordcloudData,scale = c(2,0.5),max.words = 200, rot.per=0)
+```
+
+----------------------------------------
+## Category analysis 
+
+### Required pacakges 
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(corrplot)
+library(RColorBrewer)
+```
+
+### Read and inspect Data 
+```{r}
+youtube_df = read_csv('df_all_CLeaned_Data.csv')
+glimpse(youtube_df)
+```
+
+
+### Add a new column for category corresponding to each category ID 
+```{r}
+youtube_df <- youtube_df %>%
+  mutate(category_name = case_when(
+    categoryId == 1 ~ "Film & Animation",
+    categoryId == 2 ~ "Autos & Vehicles",
+    categoryId == 10 ~ "Music",
+    categoryId == 15 ~ "Pets & Animals",
+    categoryId == 17 ~ "Sports",
+    categoryId == 19 ~ "Travel & Events",
+    categoryId == 20 ~ "Gaming",
+    categoryId == 22 ~ "People & Blogs",
+    categoryId == 23 ~ "Comedy",
+    categoryId == 24 ~ "Entertainment",
+    categoryId == 25 ~ "News & Politics",
+    categoryId == 26 ~ "Howto & Style",
+    categoryId == 27 ~ "Education",
+    categoryId == 28 ~ "Science & Technology",
+    categoryId == 29 ~ "Nonprofits & Activism",
+    ))
+youtube_df$category_name = as.factor(youtube_df$category_name)
+```
+
+### Plot distribution of video categories
+```{r}
+ggplot(youtube_df, aes(x=reorder(category_name, category_name, function(x)-length(x)))) +
+  geom_bar(fill='red2') +  labs(x='Category name') +
+  theme_light()+
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1))+
+  ggtitle("Barplot of video cateogory distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Plot average view count for each category
+```{r}
+grouped_average = youtube_df %>% 
+  group_by(category_name) %>%
+  summarise(average_view = mean(viewCount))
+
+ggplot(grouped_average, aes(x=reorder(category_name, -average_view), y = average_view/1000)) +
+  geom_col(fill = 'red2')+
+  labs(x='Category name', y = 'average view (in thousands)') +
+  theme_light()+
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1))+
+  ggtitle("Barplot of average view count for video cateogory")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+### Plot average like and comment count for each category
+```{r}
+grouped_average = youtube_df %>% 
+  group_by(category_name) %>%
+  summarise(average_view = mean(viewCount),
+            average_like = mean(likeCount),
+            average_comment = mean(commentCount))
+
+like = ggplot(grouped_average, aes(x=reorder(category_name, -average_like), y = average_like/1000)) +
+  geom_col(fill = 'red2')+
+  labs(x='Category name', y = 'average like (in thousands)') +
+  theme_light()+
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1))+
+  ggtitle("Average like count for each cateogory")+
+  theme(plot.title = element_text(hjust = 0.5, size = 12))
+
+comment = ggplot(grouped_average, aes(x=reorder(category_name, -average_comment), 
+                                      y = average_comment/1000)) +
+  geom_col(fill = 'red2')+
+  labs(x='Category name', y = 'average comment (in thousands)') +
+  theme_light()+
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1))+
+  ggtitle("Average comment count for each cateogory")+
+  theme(plot.title = element_text(hjust = 0.5, size = 12))
+
+grid.arrange(like,comment, ncol = 2)
+```
+
+### Add a new column for popularity index and compute average popularity index for each category
+```{r}
+youtube_df<- youtube_df %>% mutate(popularity_index = 0.7*viewCount + 0.1*likeCount + 0.2*commentCount)
+grouped_average = youtube_df %>% 
+  group_by(category_name) %>%
+  summarise(average_view = mean(viewCount),
+            average_like = mean(likeCount),
+            average_comment = mean(commentCount),
+            average_index = mean(popularity_index))
+```
+
+### Add a new column for positive_action index and visualize average positive_action for each category
+```{r}
+youtube_df<- youtube_df %>% mutate(positive_action = (likeCount + commentCount)*100/viewCount)
+
+
+grouped_average = youtube_df %>% 
+  group_by(category_name) %>%
+  summarise(average_view = mean(viewCount),
+            average_like = mean(likeCount),
+            average_comment = mean(commentCount),
+            average_positive_action = mean(positive_action))
+
+mean(grouped_average$average_positive_action)
+mean(grouped_average$average_view)/1000
+
+positive_action = ggplot(grouped_average, aes(x=reorder(category_name, -average_positive_action), 
+                                      y = average_positive_action)) +
+  geom_col(fill = 'red2')+
+  labs(x='Category name', y = 'Average positive action') +
+  theme_light()+
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1))+
+  ggtitle("Average positive action for each cateogory")+
+  theme(plot.title = element_text(hjust = 0.5, size = 12))
+
+positive_action=positive_action+geom_hline(yintercept = 5.682863)
+view=view+geom_hline(yintercept=(2450.265))
+
+positive_action
+view
+```
+
+### Add new columns of title length, description length, and number of tags
+```{r}
+youtube_df$description[is.na(youtube_df$description)] = 0
+youtube_df = youtube_df %>% 
+  mutate(title_length = nchar(title, type = 'chars', allowNA = T),
+         description_length = nchar(description, type = 'chars', allowNA = T))
+youtube_df$description_length[is.na(youtube_df$description)] = 0
+
+youtube_df = youtube_df %>% 
+  mutate(tag_count = if_else(tags == 'NULL', 0, str_count(tags, pattern = ',') + 1))
+```
+
+### Subset the dataframe just for correlation matrix
+```{r}
+music_df = youtube_df %>% filter(category_name == 'Music') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+music_df$description_length[is.na(music_df$description_length)] = 0
+
+edu_df = youtube_df %>% filter(category_name == 'Education') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+
+entertain_df = youtube_df %>% filter(category_name == 'Entertainment') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+
+blog_df = youtube_df %>% filter(category_name == 'People & Blogs') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+
+comedy_df = youtube_df %>% filter(category_name == 'Comedy') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+
+film_df = youtube_df %>% filter(category_name == 'Film & Animation') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+
+sci_df = youtube_df %>% filter(category_name == 'Science & Technology') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+
+game_df = youtube_df %>% filter(category_name == 'Gaming') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+game_df$description_length[is.na(game_df$description_length)] = 0
+
+auto_df = youtube_df %>% filter(category_name == 'Autos & Vehicles') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+
+travel_df = youtube_df %>% filter(category_name == 'Travel & Events') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+
+sports_df = youtube_df %>% filter(category_name == 'Sports') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+
+style_df = youtube_df %>% filter(category_name == 'Howto & Style') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+
+pet_df = youtube_df %>% filter(category_name == 'Pets & Animals') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+
+news_df= youtube_df %>% filter(category_name == 'News & Politics') %>%
+  select(viewCount, commentCount, likeCount, title_length, description_length, tag_count)
+
+```
+
+### construct correlation matrix for each video category
+```{r}
+par(mfrow=c(2,3))
+music_corr <- cor(music_df)
+music_plot = corrplot(music_corr, method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'Music',type="upper",order="hclust",mar=c(0,0,1,0))
+
+auto_corr <- cor(auto_df)
+auto_plot = corrplot(auto_corr, method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'Autos & Vehicles',type="upper", order="hclust", mar=c(0,0,1,0))
+
+blog_corr <- cor(blog_df)
+blog_plot = corrplot(blog_corr,  method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'People & Blogs',type="upper", order="hclust",mar=c(0,0,1,0))
+
+comedy_corr <- cor(comedy_df)
+comedy_plot = corrplot(comedy_corr,  method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'Comedy',type = 'upper', order="hclust",mar=c(0,0,1,0))
+
+edu_corr <- cor(edu_df)
+edu_plot = corrplot(edu_corr,  method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'Education',type="upper", order="hclust",mar=c(0,0,1,0))
+
+entertain_corr <- cor(entertain_df)
+entertain_plot = corrplot(comedy_corr,  method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'Entertainment',type="upper",order="hclust", mar=c(0,0,1,0))
+```
+
+
+```{r}
+par(mfrow=c(2,3))
+film_corr <- cor(film_df)
+film_plot = corrplot(film_corr,  method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'Film & Animation',type="upper", order="hclust", mar=c(0,0,1,0))
+
+game_corr <- cor(game_df)
+game_plot = corrplot(game_corr, method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'Gaming',type="upper", order="hclust", mar=c(0,0,1,0))
+
+news_corr <- cor(news_df)
+news_plot = corrplot(news_corr,method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'News & Politics',type="upper", order="hclust", mar=c(0,0,1,0))
+
+pet_corr <- cor(pet_df)
+pet_plot = corrplot(pet_corr, method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'Pets & Animals',type="upper", order="hclust", mar=c(0,0,1,0))
+
+sci_corr <- cor(sci_df)
+sci_plot = corrplot(sci_corr, method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'Science & Technology',type="upper", order="hclust", mar=c(0,0,1,0))
+
+sports_corr <- cor(sports_df)
+sports_plot = corrplot(sports_corr, method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'Sports',type="upper", order="hclust", mar=c(0,0,1,0))
+
+```
+
+```{r}
+par(mfrow=c(1,2))
+style_corr <- cor(style_df)
+style_plot = corrplot(style_corr, method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'Howto & Style',type="upper", order="hclust", mar=c(0,0,1,0))
+
+travel_corr <- cor(travel_df)
+travel_plot = corrplot(travel_corr, method="color", col=brewer.pal(n=8, name="RdBu"),
+         title = 'Travel & Events',type="upper", order="hclust", mar=c(0,0,1,0))
+
+```
+
+
+### Plot distribution of title length, description length
+```{r}
+title_length = ggplot(youtube_df, aes(x=title_length)) +
+  geom_histogram(fill = 'red2')+
+  labs(x='Title length', y = 'count') +
+  theme_light()+
+  ggtitle("Title length distribution in videos")+
+  theme(plot.title = element_text(hjust = 0.5, size = 12))
+title_length
+
+desc_length =  ggplot(youtube_df, aes(x=description_length)) +
+  geom_histogram(fill = 'red2')+
+  labs(x='Description length', y = 'count') +
+  theme_light()+
+  ggtitle("Description length distribution in videos")+
+  theme(plot.title = element_text(hjust = 0.5, size = 12))+
+  scale_x_continuous(breaks = seq(0, 7000, 500), lim = c(0, 7000))
+  
+desc_length
+```
+
+## Time Analysis
+
+
+### Read data
+```{r}
+df= read.csv("df_all_Cleaned_Data.csv", encoding = "UTF-8", stringsAsFactors = F)
+head(df)
+```
+
+
+### Transform time formating to time series format
+```{r}
+df$publishedAt = as.POSIXct(strptime(df$publishedAt, format = "%Y-%m-%dT%H:%M:%OS", tz = "EST"), tz = "EST")
+```
+
+
+
+```{r}
+df$publishedAt[1]
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+```
+
+
+### Comment, view,like plot based on time
+
+```{r}
+p1 = ggplot(df ,aes(x = publishedAt, y = viewCount)) + geom_line() + geom_smooth() +xlab("")
+
+p2 = ggplot(df ,aes(x = publishedAt, y = commentCount)) + geom_line() + geom_smooth() +xlab("")
+
+p3 = ggplot(df ,aes(x = publishedAt, y = likeCount)) + geom_line() + geom_smooth() +xlab("")
+
+
+```
+```{r}
+#install.packages("ggpubr")
+library(ggpubr)
+```
+
+
+
+
+
+```{r}
+ggarrange(p1, p2, p3)
+```
+
+
+### activescore vs time
+```{r}
+dft = data.frame("published time" = df$publishedAt,"activescore" = (df$commentCount+df$likeCount)/df$viewCount)
+```
+
+```{r}
+plot(dft$published.time, dft$activescore, type = "h", main = "User Motivation Based on Time", xlab = "Published time", ylab = "Motivation")
+```
+```{r}
+#library(ggplot2)
+
+ggplot(dft, aes(published.time, activescore))+geom_smooth()
+```
+
+## Project Prediction
+
+```{r}
+df = read.csv('df_all_Cleaned_Data.csv', encoding = "UTF-8", stringsAsFactors = F)
+```
+
+#### Correlation plot
+```{r}
+library(stats)
+library(dplyr)
+eva_df <- subset(df, select = c("viewCount","commentCount","likeCount"))
+eva_cor <- round(cor(eva_df),2)
+eva_cor
+library(corrplot)
+corrplot(eva_cor, type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+
+normalize <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x)))
+}
+
+eva_df$likeCountnor <- normalize(eva_df$likeCount)
+eva_df$viewCountnor <- normalize(eva_df$viewCount)
+eva_df$commentCountnor <- normalize(eva_df$commentCount)
+```
+
+
+### Model Building
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(corrplot)
+library(RColorBrewer)
+df <- df %>% 
+  mutate(action = (likeCount + commentCount)*100/viewCount)
+
+df <- df %>%
+  mutate(category_name = case_when(
+    categoryId == 1 ~ "Film & Animation",
+    categoryId == 2 ~ "Autos & Vehicles",
+    categoryId == 10 ~ "Music",
+    categoryId == 15 ~ "Pets & Animals",
+    categoryId == 17 ~ "Sports",
+    categoryId == 19 ~ "Travel & Events",
+    categoryId == 20 ~ "Gaming",
+    categoryId == 22 ~ "People & Blogs",
+    categoryId == 23 ~ "Comedy",
+    categoryId == 24 ~ "Entertainment",
+    categoryId == 25 ~ "News & Politics",
+    categoryId == 26 ~ "Howto & Style",
+    categoryId == 27 ~ "Education",
+    categoryId == 28 ~ "Science & Technology",
+    categoryId == 29 ~ "Nonprofits & Activism",
+  ))
+df$category_name = as.factor(df$category_name)
+
+df = df %>% 
+  mutate(title_length = nchar(title, type = 'chars', allowNA = T),
+         description_length = nchar(description, type = 'chars', allowNA = T))
+
+df = df %>% 
+  mutate(tag_count = if_else(tags == 'NULL', 0, str_count(tags, pattern = ',') + 1))
+
+library(stringr)
+metrics_word <- 'follow|subscribe|like|twitter|instagram|channel|facebook|twitter.|live|free|tiktok|stream|facebook.|discord.|website'
+content_word <- 'new|minecraft|music|official|game|best|season|stream|world|tri|code|love|exclusivas|twitch'
+
+library(NLP)
+library(tm); library(SnowballC); library(magrittr)
+df$title = tolower(df$title)
+
+description_metrics_key <- str_count(df$description, metrics_word)
+description_content_key <- str_count(df$description, content_word)
+title_metrics_key <- str_count(df$title, metrics_word)
+title_content_key <- str_count(df$title, content_word)
+
+df <- cbind(df,description_metrics_key,description_content_key,title_metrics_key,title_content_key)
+glimpse(df)
+df_view <- subset(df, select = c("category_name","title_length","description_length","tag_count","description_metrics_key",
+                                      "description_content_key","title_metrics_key","title_content_key","viewCount"))
+df_action <- subset(df, select = c("category_name","title_length","description_length","tag_count","description_metrics_key",
+                                 "description_content_key","title_metrics_key","title_content_key","action"))
+library(caret)
+set.seed(1031)
+split_view = createDataPartition(y=df_view$viewCount,p = 0.7,list = F)
+split_action = createDataPartition(y=df_action$action,p = 0.7,list = F)
+
+train_view = df_view[split_view,]
+test_view = df_view[-split_view,]
+
+train_action = df_action[split_action,]
+test_action = df_action[-split_action,]
+```
+### Linear Regression
+
+#### linear regression for view prediction
+```{r}
+model1 = lm(viewCount ~., data=train_view)
+summary(model1)
+#pred1 = predict(model1)
+#sse1_test = sum((pred1 - test_view$viewCount)^2)
+#sst1_test = sum((mean(train_view$viewCount)-test_view$viewCount)^2)
+#model1_r2_test = 1 - sse1_test/sst1_test; model1_r2_test
+#rmse1_test = sqrt(mean((pred1-test_view$viewCount)^2)); rmse1_test
+```
+
+#### linear regression for action prediction
+
+```{r}
+model2 = lm(action~.,data=train_action)
+summary(model2)
+#pred2 = predict(model2)
+#sse2 = sum((pred2 - train_action$action)^2)
+#sst2 = sum((mean(train_action$action)-train_action$action)^2)
+#model2_r2 = 1 - sse2/sst2; model2_r2
+#rmse2 = sqrt(mean((pred2-train_action$action)^2)); rmse2
+```
+
+### divide popularity, 50% + as 1, 50% - as 0
+```{r}
+viewmedian = median(df$viewCount)
+actionmedian = median(df$action)
+
+df <- df %>%
+  mutate(top50_view = case_when(
+    viewCount >  viewmedian ~ 'True',
+    viewCount <  viewmedian ~ 'False'))%>%
+  mutate(top50_action = case_when(
+  action >  actionmedian ~ 'True',
+  action <  actionmedian ~ 'False'
+  ))
+```
+
+### Desion Tree
+```{r}
+library(rpart); library(rpart.plot)
+#for views
+split3 = createDataPartition(y=df$top50_view,p = 0.7,list = F)
+train3 = df[split3,]
+test3 = df[-split3,]
+tree1 = rpart(top50_view ~ category_name + title_length + description_length + tag_count + description_metrics_key + description_content_key + title_metrics_key + title_content_key,
+              data = train3, method = 'class')
+
+rpart.plot(tree1)
+pred3 = predict(tree1, newdata = test3, type ='class')
+table_mat3 <- table(test3$top50_view, pred3)
+table_mat3
+accuracy_Test3 <- sum(diag(table_mat3)) / sum(table_mat3)
+accuracy_Test3
+#for actions
+split4 = createDataPartition(y=df$top50_action,p = 0.7,list = F)
+train4 = df[split4,]
+test4 = df[-split4,]
+tree2 = rpart(top50_action ~ category_name + title_length + description_length + tag_count + description_metrics_key + description_content_key + title_metrics_key + title_content_key
+              , data = train4, method = 'class')
+rpart.plot(tree2)
+pred4 = predict(tree2, newdata = test4, type ='class')
+table_mat4 <- table(test4$top50_action, pred4)
+table_mat4
+accuracy_Test4 <- sum(diag(table_mat4)) / sum(table_mat4)
+accuracy_Test4
+```
+
+### Logistic
+```{r}
+#for views
+model5 = glm(as.factor(top50_view) ~ category_name + title_length + description_length + tag_count + description_metrics_key + description_content_key + title_metrics_key + title_content_key,
+             data=train3, family='binomial')
+pred5 = predict(model5,newdata=test3,type='response')
+ct_pred5 = table(top50 = test3$top50_view,
+           predictions = as.integer(pred5>0.5)); ct_pred5
+accuracy_test5 = sum(ct_pred5[1,1],ct_pred5[2,2])/nrow(test3); accuracy_test5
+accuracy_test5
+#for actions
+model6 = glm(as.factor(top50_action) ~ category_name + title_length + description_length + tag_count + description_metrics_key + description_content_key + title_metrics_key + title_content_key,
+             data=train3, family='binomial')
+pred6 = predict(model6,newdata=test3,type='response')
+ct_pred6 = table(top50 = test3$top50_action,
+                 predictions = as.integer(pred6>0.5)); ct_pred6
+accuracy_test6 = sum(ct_pred6[1,1],ct_pred6[2,2])/nrow(test3); accuracy_test6
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
